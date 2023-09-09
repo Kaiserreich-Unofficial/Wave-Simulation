@@ -1,9 +1,9 @@
-import cupy as cp
 # 导入matplotlib和mpl_toolkits模块，用于绘制3D图形
 import matplotlib.pyplot as plt
 from matplotlib import animation
 from mpl_toolkits.mplot3d import Axes3D
 import numpy as np
+import cupy as cp
 
 
 class FFT_wave:
@@ -14,20 +14,14 @@ class FFT_wave:
     N：每个维度上的网格点数，默认为 64。
     T：波的周期，默认为 10。
     A：波的振幅，默认为 0.5。
+    wind：风速，默认为 10 m/s。
+    length：距离，默认为 100 km。
     """
-    def __init__(self, L = 20, N = 64, T = 10, A = 0.5):
+    def __init__(self, L = 20, N = 64, T = 10, A = 0.5, wind = 10, length = 100):
         self.L = L
         self.N = N
 
-        self.gravity = 9.81
-
-        self.Period = T # 水波周期，单位s
-        self.omega = 2*np.pi/self.Period # 深水条件下的波动圆频率
-        self.amp = A # 深水波动下的振幅
-        self.dens = 1.025e3 # 海水的密度
-        self.energy_dens = 1/2* self.dens * self.gravity * self.amp**2 # 波浪的能量密度
-
-        self.A = np.sqrt(self.energy_dens/ self.dens * self.omega**2) # 水波总能量常数
+        self.gravity = 9.81 # 重力加速度
 
         x = np.linspace(-L, L, N)
         y = np.linspace(-L, L, N)
@@ -40,19 +34,27 @@ class FFT_wave:
 
         self.KX, self.KY = cp.meshgrid(kx, ky)
 
-        spectrum = self.phillips()
+        # 定义峰值增强因子和形状参数
+        self.gamma = 3.3
+        self.sigma = 0.08
+
+        # 根据风速和距离计算峰值波数和与风相关的常数
+        self.kp = 0.21 * self.gravity / wind**2
+        self.alpha = 0.006 * cp.sqrt(wind * length / self.gravity)
+
+        spectrum = self.jonswap()
         spectrum[cp.isnan(spectrum)] = 0
 
         self.amplitude = cp.sqrt(
             spectrum) * cp.random.randn(self.N, self.N)
         self.amplitude[0, 0] = 0
 
-    def phillips(self):
+    def jonswap(self):
         k_mold = cp.sqrt(self.KX ** 2 + self.KY ** 2)
         k_mold = cp.where(k_mold == 0, 1e-3, k_mold)
-        dampling = 1e-3
-        L2 = self.L**2 * dampling**2
-        return self.A * cp.exp(-1/(k_mold**2 * self.L**2))/(k_mold**4) * cp.exp(-k_mold**2 * L2)
+        # 使用JONSWAP谱公式
+        return self.alpha * self.gravity**2 / k_mold**5 * cp.exp(-5/4 * (self.kp / k_mold)**4) * \
+            self.gamma**cp.exp(-(k_mold - self.kp)**2 / (2 * self.sigma**2 * self.kp**2))
 
     def dispersion(self, kx, ky):
         return cp.sqrt(self.gravity * cp.sqrt(kx**2 + ky**2))
@@ -88,9 +90,9 @@ class FFT_wave:
         self.ax.set_xlabel('X')
         self.ax.set_ylabel('Y')
         self.ax.set_zlabel('Z')
-        self.ax.set_xlim(-self.L, self.L)
-        self.ax.set_ylim(-self.L, self.L)
-        self.ax.set_zlim(0, 0.5)
+        # self.ax.set_xlim(-self.L, self.L)
+        # self.ax.set_ylim(-self.L, self.L)
+        # self.ax.set_zlim(0, 5)
         # 设置标题
         self.ax.set_title('FFT Wave Simulation')
         # 创建一个用于动画的函数，设置帧数为100，间隔为50毫秒，重复为True
@@ -111,16 +113,20 @@ class FFT_wave:
         # 计算海浪的高度和法向量
         self.calculate()
 
-        # 绘制mesh，设置颜色为蓝色，透明度为0.8
-        self.ax.plot_surface(self.x_offset, self.y_offset,
-                             self.heights, color='b', alpha=0.8)
+        # 绘制mesh，设置颜色映射为'jet'，透明度为0.8
+        surf = self.ax.plot_surface(self.x_offset, self.y_offset,
+                             self.heights, cmap='viridis', alpha=0.8)
+
+        # 添加颜色条
+        # fig.colorbar(surf)
+
         # 设置坐标轴的范围和标签
         self.ax.set_xlabel('X')
         self.ax.set_ylabel('Y')
         self.ax.set_zlabel('Z')
         self.ax.set_xlim(-self.L, self.L)
         self.ax.set_ylim(-self.L, self.L)
-        self.ax.set_zlim(0, 0.5)
+        self.ax.set_zlim(0, 2)
         # 设置标题
         self.ax.set_title('FFT Wave Simulation')
 
